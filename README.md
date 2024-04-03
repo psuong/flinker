@@ -14,10 +14,14 @@ Below is example of the yaml file.
 
 ```yml
 # You can define either a hardlink or symlink between 2 files
-- hardlink
+hardlink:
   # The following can be a relative or absolute path
   - src: a.txt 
   - dst: b.txt
+---
+symlink:
+  - src: a.txt
+  - src: c.txt
 ```
 
 ## Build

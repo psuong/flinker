@@ -1,18 +1,17 @@
 use env_logger::{Builder, Target};
-use log::{error, info};
+use log::{error, info, LevelFilter};
 use regex::Regex;
 use std::{
     env::args,
     fs::{hard_link, read_to_string, remove_file},
-    io,
-    io::Result,
+    io::{self, Result},
     os::windows::fs::symlink_file,
-    path::Path,
+    path::Path
 };
 use yaml_rust2::{Yaml, YamlLoader};
 
 fn main() {
-    let _ = Builder::from_default_env().target(Target::Stdout).init();
+    let _ = Builder::from_default_env().target(Target::Stdout).filter_level(LevelFilter::Info).init();
 
     // The first argument is the path to the yaml file.
     let args: Vec<String> = args().collect();
@@ -81,15 +80,18 @@ fn load_yaml_contents(yaml_path: &String) {
 /// ```
 fn parse_yaml_contents(contents: String) {
     let result = YamlLoader::load_from_str(&contents).unwrap();
-    let doc = &result[0];
-
-    execute_file_linker(&doc["softlink"], |src: &Path, dst: &Path| -> Result<()> {
+    let symlinker = |src: &Path, dst: &Path| -> Result<()> {
         symlink_file(src, dst)
-    });
+    };
 
-    execute_file_linker(&doc["hardlink"], |src: &Path, dst: &Path| -> Result<()> {
-        hard_link(src, dst)
-    });
+    let hardlinker = |src: &Path, dst: &Path| -> Result<()> {
+            hard_link(src, dst)
+    };
+
+    for doc in &result {
+        execute_file_linker(&doc["symlink"], symlinker);
+        execute_file_linker(&doc["hardlink"], hardlinker);
+    }
 }
 
 /// Executes any function that processes 2 paths and returns an IO Result.
