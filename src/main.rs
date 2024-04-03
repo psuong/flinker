@@ -47,7 +47,7 @@ fn main() {
 /// ```
 fn load_yaml_contents(yaml_path: &String) {
     let path = Path::new(yaml_path);
-    if is_file(&path) {
+    if !is_file(&path) {
         error!("{} is not a valid path to a YAML file", yaml_path);
         return;
     }
