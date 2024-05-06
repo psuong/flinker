@@ -5,7 +5,7 @@ use std::{
     env::args,
     fs::{hard_link, read_to_string, remove_file},
     io::{self, Result},
-    os::windows::fs::symlink_file,
+    os::windows::fs::{symlink_dir, symlink_file},
     path::Path
 };
 use yaml_rust2::{Yaml, YamlLoader};
@@ -85,12 +85,17 @@ fn parse_yaml_contents(contents: String) {
     };
 
     let hardlinker = |src: &Path, dst: &Path| -> Result<()> {
-            hard_link(src, dst)
+        hard_link(src, dst)
+    };
+
+    let dirlink = |src: &Path, dst: &Path| -> Result<()> {
+        symlink_dir(src, dst)
     };
 
     for doc in &result {
         execute_file_linker(&doc["symlink"], symlinker);
         execute_file_linker(&doc["hardlink"], hardlinker);
+        execute_directory_symlinker(&doc["symlink-dir"], dirlink);
     }
 }
 
@@ -109,9 +114,7 @@ fn parse_yaml_contents(contents: String) {
 /// });
 /// ```
 fn execute_file_linker<F>(linker_type: &Yaml, linker_function: F)
-where
-    F: FnOnce(&Path, &Path) -> io::Result<()>,
-{
+    where F: FnOnce(&Path, &Path) -> io::Result<()>, {
     if !linker_type.is_badvalue() {
         let src = &linker_type[0]["src"];
         let dst = &linker_type[1]["dst"];
@@ -143,6 +146,40 @@ where
         } else {
             error!("Failed to parse the src and dst values from the YAML!");
         }
+    }
+}
+
+fn execute_directory_symlinker<F>(linker_type: &Yaml, linker_function: F) 
+    where F: FnOnce(&Path, &Path) -> io::Result<()>, {
+
+    if !linker_type.is_badvalue() {
+        let src = &linker_type[0]["src"];
+        let dst = &linker_type[1]["dst"];
+
+        if !&src.is_badvalue() && !&dst.is_badvalue() && Path::new(src).exists() {
+            let src_path = Path::new(src.as_str().unwrap());
+            let dst_path = Path::new(dst.as_str().unwrap());
+
+            if is_file(&dst_path) {
+                let _ = remove_file(&dst_path);
+            }
+
+            if is_file(&src_path) {
+                // The paths exist so do a hard link
+                match linker_function(src_path, dst_path) {
+                    Ok(_) => info!(
+                        "Successfully linked from {} -> {}",
+                        src.as_str().unwrap(),
+                        dst.as_str().unwrap()
+                    ),
+                    Err(e) => error!(
+                        "Failed to link from {} -> {}. \n {}",
+                        src.as_str().unwrap(),
+                        dst.as_str().unwrap(),
+                        e
+                    ),
+                }
+            }
     }
 }
 
