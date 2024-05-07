@@ -1,3 +1,5 @@
 /target
 *.yml
 *.txt
+test-src/
+test-dst
