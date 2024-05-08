@@ -1,8 +1,14 @@
+use dirs::home_dir;
 use env_logger::{Builder, Target};
 use log::{error, info, LevelFilter};
 use regex::Regex;
 use std::{
-    env::{self, args}, ffi::OsString, fs::{hard_link, read_to_string, remove_file}, io::{self, Result}, os::windows::fs::{symlink_dir, symlink_file}, path::Path
+    env::{self, args},
+    ffi::OsString,
+    fs::{hard_link, read_to_string, remove_file},
+    io::{self, Result},
+    os::windows::fs::{symlink_dir, symlink_file},
+    path::Path,
 };
 use yaml_rust2::{Yaml, YamlLoader};
 
@@ -12,12 +18,11 @@ fn main() {
         .filter_level(LevelFilter::Info)
         .init();
 
-    collect_environment_directories();
+    let environment_dirs = collect_environment_directories();
 
-    //for (key, value) in environment_dirs {
-    //    println!("{}, {}", key, value)
-    //}
-
+    for (key, value) in environment_dirs {
+        println!("{}, {}", key, value)
+    }
     return;
 
     // The first argument is the path to the yaml file.
@@ -167,33 +172,47 @@ where
                 let dst_path = Path::new(dst.as_str().unwrap());
 
                 match linker_function(src_path, dst_path) {
-                    Ok(_) => info!("Successfully linked directory: {} -> {}",
+                    Ok(_) => info!(
+                        "Successfully linked directory: {} -> {}",
                         src.as_str().unwrap(),
                         dst.as_str().unwrap()
                     ),
-                    Err(e) => error!("Failed to link directory from {} -> {} \n {}", 
-                        src.as_str().unwrap(), 
+                    Err(e) => error!(
+                        "Failed to link directory from {} -> {} \n {}",
+                        src.as_str().unwrap(),
                         dst.as_str().unwrap(),
                         e
-                    )
+                    ),
                 }
             }
         }
     }
 }
 
-fn collect_environment_directories() {
-    let mut filtered_vars : Vec<(OsString, OsString)> = env::vars_os().into_iter().filter(|(key, value)| {
-        println!("{}, {}", key.to_str().unwrap(), value.to_str().unwrap());
-        let path = Path::new(value);
-        path.exists() && path.is_dir()
-    }).collect();
+fn collect_environment_directories() -> Vec<(String, String)>{
+    let mut filtered_vars: Vec<(String, String)> = env::vars_os()
+        .into_iter()
+        .filter(|(key, value)| {
+            let path = Path::new(value);
+            path.exists() && path.is_dir()
+        })
+        .map(|(key, value)| {
+            (key.to_str().unwrap().to_string(), value.to_str().unwrap().to_string()) 
+        })
+        .collect();
+
+    let home_value = home_dir().unwrap().to_str().unwrap().to_string();
+    let home_key = "HOME".to_string();
+    // let tuple = (home_key, home_value);
+    // filtered_vars.append(tuple);
 
     filtered_vars.sort_by(|a, b| {
         let (a_key, _) = a;
         let (b_key, _) = b;
-        a_key.to_str().unwrap().partial_cmp(b_key.to_str().unwrap()).unwrap()
+        a_key.partial_cmp(b_key).unwrap()
     });
+
+    filtered_vars
 }
 
 fn try_read_relative_aliases(path: String) {
