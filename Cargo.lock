@@ -156,11 +156,12 @@ dependencies = [
 
 [[package]]
 name = "flinker"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "dirs",
  "env_logger",
  "log",
+ "once_cell",
  "regex",
  "yaml-rust2",
 ]

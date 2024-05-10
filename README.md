@@ -36,6 +36,6 @@ cargo build --release
 * Add flinker to your path
 
 ## Usage
-```
+```bash
 flinker.exe example.yml
 ```
