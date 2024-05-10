@@ -4,13 +4,17 @@ use log::{error, info, LevelFilter};
 use regex::Regex;
 use std::{
     env::{self, args},
-    ffi::OsString,
     fs::{hard_link, read_to_string, remove_file},
     io::{self, Result},
     os::windows::fs::{symlink_dir, symlink_file},
-    path::Path,
+    path::Path, ptr::addr_of,
 };
 use yaml_rust2::{Yaml, YamlLoader};
+
+static mut ENVIRONMENT_DIRS: Vec<(String, String)> = Vec::new();
+
+const SRC_KEY: &str = "src";
+const DST_KEY: &str = "dst";
 
 fn main() {
     let _ = Builder::from_default_env()
@@ -18,12 +22,13 @@ fn main() {
         .filter_level(LevelFilter::Info)
         .init();
 
-    let environment_dirs = collect_environment_directories();
-
-    for (key, value) in environment_dirs {
-        println!("{}, {}", key, value)
+    unsafe {
+        let env_dir = collect_environment_directories();
+        ENVIRONMENT_DIRS.reserve(env_dir.len());
+        for (key, value) in env_dir {
+            ENVIRONMENT_DIRS.push((key, value));
+        }
     }
-    return;
 
     // The first argument is the path to the yaml file.
     let args: Vec<String> = args().collect();
@@ -92,16 +97,17 @@ fn load_yaml_contents(yaml_path: &String) {
 /// ```
 fn parse_yaml_contents(contents: String) {
     let result = YamlLoader::load_from_str(&contents).unwrap();
+
     let symlinker = |src: &Path, dst: &Path| -> Result<()> { symlink_file(src, dst) };
-
     let hardlinker = |src: &Path, dst: &Path| -> Result<()> { hard_link(src, dst) };
-
     let dirlink = |src: &Path, dst: &Path| -> Result<()> { symlink_dir(src, dst) };
 
-    for doc in &result {
-        execute_file_linker(&doc["symlink"], symlinker);
-        execute_file_linker(&doc["hardlink"], hardlinker);
-        execute_directory_symlinker(&doc["symlink-dir"], dirlink);
+    unsafe {
+        for doc in &result {
+            execute_file_linker(&doc["symlink"], symlinker);
+            execute_file_linker(&doc["hardlink"], hardlinker);
+            execute_directory_linker(&doc["symlink-dir"], dirlink);
+        }
     }
 }
 
@@ -119,34 +125,39 @@ fn parse_yaml_contents(contents: String) {
 ///     hard_link(src, dst)
 /// });
 /// ```
-fn execute_file_linker<F>(linker_type: &Yaml, linker_function: F)
+unsafe fn execute_file_linker<F>(linker_type: &Yaml, linker_function: F)
 where
     F: FnOnce(&Path, &Path) -> io::Result<()>,
 {
     if !linker_type.is_badvalue() {
-        let src = &linker_type[0]["src"];
-        let dst = &linker_type[1]["dst"];
+        let src = &linker_type[0][SRC_KEY];
+        let dst = &linker_type[1][DST_KEY];
 
         if !&src.is_badvalue() && !&dst.is_badvalue() {
-            let src_path = Path::new(src.as_str().unwrap());
-            let dst_path = Path::new(dst.as_str().unwrap());
+            let dst_path = dst.as_str().unwrap();
+            let parsed_dst_path = try_read_relative_aliases(dst_path).unwrap_or(dst_path.to_string());
+            let absolute_dst_path = Path::new(parsed_dst_path.as_str());
 
-            if is_file(&dst_path) {
-                let _ = remove_file(&dst_path);
+            if is_file(&absolute_dst_path) {
+                let _ = remove_file(&absolute_dst_path);
             }
 
-            if is_file(&src_path) {
+            let src_path = src.as_str().unwrap();
+            let parsed_src_path = try_read_relative_aliases(src_path).unwrap_or(src_path.to_string());
+            let absolute_src_path = Path::new(parsed_src_path.as_str());
+
+            if is_file(&absolute_src_path) {
                 // The paths exist so do a hard link
-                match linker_function(src_path, dst_path) {
+                match linker_function(absolute_src_path, absolute_dst_path) {
                     Ok(_) => info!(
                         "Successfully linked from {} -> {}",
-                        src.as_str().unwrap(),
-                        dst.as_str().unwrap()
+                        parsed_src_path,
+                        parsed_dst_path
                     ),
                     Err(e) => error!(
                         "Failed to link from {} -> {}. \n {}",
-                        src.as_str().unwrap(),
-                        dst.as_str().unwrap(),
+                        parsed_src_path,
+                        parsed_dst_path,
                         e
                     ),
                 }
@@ -157,30 +168,33 @@ where
     }
 }
 
-fn execute_directory_symlinker<F>(linker_type: &Yaml, linker_function: F)
+unsafe fn execute_directory_linker<F>(linker_type: &Yaml, linker_function: F)
 where
     F: FnOnce(&Path, &Path) -> io::Result<()>,
 {
     if !linker_type.is_badvalue() {
-        let src = &linker_type[0]["src"];
-        let dst = &linker_type[1]["dst"];
+        let src = &linker_type[0][SRC_KEY];
+        let dst = &linker_type[1][DST_KEY];
 
         if !&src.is_badvalue() && !&dst.is_badvalue() {
-            let src_path = Path::new(src.as_str().unwrap());
+            let src_path = src.as_str().unwrap();
+            let parsed_src_path = try_read_relative_aliases(src_path).unwrap_or(src_path.to_string());
+            let absolute_src_path = Path::new(parsed_src_path.as_str());
 
-            if src_path.is_dir() {
-                let dst_path = Path::new(dst.as_str().unwrap());
+            if absolute_src_path.is_dir() {
+                let parsed_dst_path = try_read_relative_aliases(dst.as_str().unwrap()).unwrap_or(dst.as_str().unwrap().to_string());
+                let absolute_dst_path = Path::new(parsed_dst_path.as_str());
 
-                match linker_function(src_path, dst_path) {
+                match linker_function(absolute_src_path, absolute_dst_path) {
                     Ok(_) => info!(
                         "Successfully linked directory: {} -> {}",
-                        src.as_str().unwrap(),
-                        dst.as_str().unwrap()
+                        parsed_src_path.as_str(),
+                        parsed_dst_path.as_str()
                     ),
                     Err(e) => error!(
                         "Failed to link directory from {} -> {} \n {}",
-                        src.as_str().unwrap(),
-                        dst.as_str().unwrap(),
+                        parsed_src_path.as_str(),
+                        parsed_dst_path.as_str(),
                         e
                     ),
                 }
@@ -189,22 +203,26 @@ where
     }
 }
 
-fn collect_environment_directories() -> Vec<(String, String)>{
+fn collect_environment_directories() -> Vec<(String, String)> {
     let mut filtered_vars: Vec<(String, String)> = env::vars_os()
         .into_iter()
-        .filter(|(key, value)| {
+        .filter(|(_, value)| {
             let path = Path::new(value);
             path.exists() && path.is_dir()
         })
         .map(|(key, value)| {
-            (key.to_str().unwrap().to_string(), value.to_str().unwrap().to_string()) 
+            (
+                key.to_str().unwrap().to_string(),
+                value.to_str().unwrap().to_string(),
+            )
         })
         .collect();
 
+    // Add the $HOME directory
     let home_value = home_dir().unwrap().to_str().unwrap().to_string();
     let home_key = "HOME".to_string();
-    // let tuple = (home_key, home_value);
-    // filtered_vars.append(tuple);
+    let tuple = (home_key, home_value);
+    filtered_vars.push(tuple);
 
     filtered_vars.sort_by(|a, b| {
         let (a_key, _) = a;
@@ -215,9 +233,31 @@ fn collect_environment_directories() -> Vec<(String, String)>{
     filtered_vars
 }
 
-fn try_read_relative_aliases(path: String) {
-    let path_buffer = Path::new(&path);
-    info!("Src: {}, Exists: {}", path, path_buffer.exists());
+unsafe fn try_read_relative_aliases(path: &str) -> Option<String> {
+    // Get the environment variable but keep it as a constant pointer
+    let environment_vars = addr_of!(ENVIRONMENT_DIRS);
+
+    for (var, value) in &*environment_vars {
+        let pattern = format!(r"^\$({})(/|\\)(.+)$", var);
+        let r = Regex::new(&pattern).unwrap();
+
+        if r.is_match(path) {
+            let caps = r.captures(path).unwrap();
+            let mut absolute_path = String::with_capacity(path.len() + value.len());
+
+            for c in value.chars() {
+                absolute_path.push(c);
+            }
+
+            for i in 2..caps.len() {
+                for c in caps.get(i).map_or("", |m| m.as_str()).chars() {
+                    absolute_path.push(c);
+                }
+            }
+            return Some(absolute_path)
+        }
+    }
+    Option::None
 }
 
 /// Checks if the path exists and is a file.

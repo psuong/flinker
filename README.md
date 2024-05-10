@@ -21,7 +21,10 @@ hardlink:
 ---
 symlink:
   - src: a.txt
-  - src: c.txt
+  - dst: c.txt
+symlink-dir:
+  - src: $HOME/a
+  - dst: $HOME/b
 ```
 
 ## Build
