@@ -3,10 +3,11 @@
 FLinker or File Linker is a small executable that lets you
 
 * define a .yml file 
-    * that points from the original file to a target file
-    * specify the kind of file linkage
+    * that points from the original file / directory to a target file / directory
+    * specify the kind of linkage between files / directories
         * symlink
-        * hard link
+        * hardlink
+        * symlink-dir
 
 ## Example
 
